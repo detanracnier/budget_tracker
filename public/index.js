@@ -1,6 +1,90 @@
 let transactions = [];
 let myChart;
 
+let createLocalDB = () => {
+  const request = window.indexedDB.open("budgetTracker", 1);
+  request.onupgradeneeded = event => {
+      const db = event.target.result;
+      const dbStore = db.createObjectStore("budgetTracker", { keyPath: "id", autoIncrement: true });
+      dbStore.createIndex("nameIndex", "name", {unique: false});
+      dbStore.createIndex("ammountIndex", "value", {unique: false});
+      dbStore.createIndex("dateIndex", "date", {unique: false});
+  }
+}
+
+let saveRecord = (data) => {
+  const request = window.indexedDB.open("budgetTracker", 1);
+  request.onsuccess = () => {
+      const db = request.result;
+      const transaction = db.transaction(["budgetTracker"], "readwrite");
+      const dbStore = transaction.objectStore("budgetTracker");
+      dbStore.add({ name: data.name, value: data.value, date: data.date });
+  }
+}
+
+let getAllRecords = () => {
+  const request = window.indexedDB.open("budgetTracker", 1);
+  request.onsuccess = () => {
+      const db = request.result;
+      const transaction = db.transaction(["budgetTracker"], "readwrite");
+      const dbStore = transaction.objectStore("budgetTracker");
+      const data = dbStore.getAll();
+
+      data.onsuccess = () => {
+          transactions = transactions.concat(data.result);
+          populateTotal();
+          populateTable();
+          populateChart();
+      }
+  }
+}
+
+let sendLocalCache = () => {
+  const request = window.indexedDB.open("budgetTracker", 1);
+  request.onsuccess = () => {
+      const db = request.result;
+      const transaction = db.transaction(["budgetTracker"], "readwrite");
+      const dbStore = transaction.objectStore("budgetTracker");
+      const getRequest = dbStore.getAll();
+
+      getRequest.onsuccess = () => {
+          getRequest.result.forEach(data => {
+
+              let dataEntry = {
+                  name: data.name,
+                  value: data.value,
+                  date: data.date
+              }
+
+              console.log(dataEntry);
+
+              fetch("/api/transaction", {
+                  method: "POST",
+                  body: JSON.stringify(dataEntry),
+                  headers: {
+                      Accept: "application/json, text/plain, */*",
+                      "Content-Type": "application/json"
+                  }
+              })
+                  .then(response => {
+                      const deleteTransaction = db.transaction(["budgetTracker"], "readwrite");
+                      const budgetSaveDelete = deleteTransaction.objectStore("budgetTracker");
+                      budgetSaveDelete.delete(data.id);
+                      console.log("local data sent");
+                      return response.json();
+                  })
+                  .catch(err => {
+                      console.log("failed send local DB" + err);
+                  });
+          })
+      }
+  }
+}
+
+createLocalDB();
+getAllRecords();
+sendLocalCache();
+
 fetch("/api/transaction")
   .then(response => {
     return response.json();
@@ -111,7 +195,7 @@ function sendTransaction(isAdding) {
   populateChart();
   populateTable();
   populateTotal();
-  
+
   // also send to server
   fetch("/api/transaction", {
     method: "POST",
@@ -121,7 +205,7 @@ function sendTransaction(isAdding) {
       "Content-Type": "application/json"
     }
   })
-  .then(response => {    
+  .then(response => {
     return response.json();
   })
   .then(data => {
